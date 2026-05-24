@@ -1,0 +1,20 @@
+-- 建表语句：保持平实，不搞花里胡哨的外键
+CREATE TABLE MessageEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    content TEXT NOT NULL,
+    isUser INTEGER NOT NULL, -- 1 代表 User，0 代表 AI (SQLite 没有原生 Boolean)
+    timestamp INTEGER NOT NULL
+);
+
+-- 查询所有记录，按时间排序
+selectAll:
+SELECT * FROM MessageEntity ORDER BY timestamp ASC;
+
+-- 插入或替换一条记录
+insertMessage:
+INSERT OR REPLACE INTO MessageEntity(id, content, isUser, timestamp)
+VALUES (?, ?, ?, ?);
+
+-- 更新消息内容（用于 AI 流式回复时的内容追加）
+updateContent:
+UPDATE MessageEntity SET content = ? WHERE id = ?;
