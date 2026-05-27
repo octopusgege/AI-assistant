@@ -48,14 +48,20 @@ class ChatScreen : Screen {
         val keyboardController = LocalSoftwareKeyboardController.current
         val listState = rememberLazyListState()
 
-        // 监听列表滚动状态，当用户主动滑动查看历史消息时收起软键盘
+        /**
+         * 监听列表滚动状态
+         * 当用户主动滑动查看历史消息时收起软键盘
+         */
         LaunchedEffect(listState.isScrollInProgress) {
             if (listState.isScrollInProgress) {
                 keyboardController?.hide()
             }
         }
 
-        // 监听对话轮次变化，自动将视图滚动至最新消息的底部
+        /**
+         * 监听对话轮次变化
+         * 自动将视图滚动至最新消息的底部
+         */
         val lastTurnContent = turns.lastOrNull()?.aiMessages?.lastOrNull()?.content
         LaunchedEffect(turns.size, lastTurnContent) {
             if (turns.isNotEmpty()) {
@@ -88,12 +94,10 @@ class ChatScreen : Screen {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 items(turns) { turn ->
-                    // 用户提问视图
                     ChatBubble(message = turn.userMessage)
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    //  AI 响应视图及其关联的交互组件
                     if (turn.aiMessages.isNotEmpty()) {
                         val displayIndex = indexOverrides[turn.groupId] ?: turn.currentDisplayIndex
                         val displayedAiMsg = turn.aiMessages[displayIndex]
@@ -112,8 +116,10 @@ class ChatScreen : Screen {
                                 onDislike = { viewModel.onInteractionClicked(displayedAiMsg.id, displayedAiMsg.interactionStatus, 2) }
                             )
 
-                            // 仅在当前展示为最新版本回复时，展示关联的追问建议列表
-                            if (displayIndex == turn.aiMessages.size - 1 && displayedAiMsg.followUpQuestions.isNotEmpty()) {
+                            /**
+                             * 渲染当前选中版本关联的追问建议列表
+                             */
+                            if (displayedAiMsg.followUpQuestions.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 displayedAiMsg.followUpQuestions.forEach { question ->
                                     FollowUpChip(text = question, onClick = { viewModel.sendMessage(question) })
@@ -129,7 +135,7 @@ class ChatScreen : Screen {
 
 /**
  * AI 消息交互操作栏
- * 复制、评价（赞/踩）、多版本回复切换功能
+ * 提供复制、评价（赞/踩）及多版本回复切换控制功能
  */
 @Composable
 private fun AiActionBar(
@@ -208,8 +214,8 @@ private fun AiActionBar(
 }
 
 /**
- * 追问标签组件
- *
+ * 关联追问标签组件
+ * 用于渲染模型推荐的上下文延伸问题
  */
 @Composable
 private fun FollowUpChip(text: String, onClick: () -> Unit) {
@@ -232,7 +238,7 @@ private fun FollowUpChip(text: String, onClick: () -> Unit) {
 
 /**
  * 基础聊天气泡组件
- * 根据消息发送方身份（用户/AI）调整背景色
+ * 根据消息发送方身份动态调整背景色及圆角样式
  */
 @Composable
 private fun ChatBubble(message: Message) {
@@ -297,8 +303,8 @@ private fun ChatTopBar() {
 }
 
 /**
- * 底部输入栏
- * 处理文本输入、发送逻辑及输入入口
+ * 底部输入栏组件
+ * 处理文本输入、发送逻辑及多模态输入入口渲染
  */
 @Composable
 private fun ChatBottomBar(

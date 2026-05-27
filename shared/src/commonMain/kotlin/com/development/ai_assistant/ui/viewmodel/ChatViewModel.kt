@@ -115,7 +115,7 @@ class ChatViewModel(
         )
         repository.insertMessage(initialAiMsg)
 
-        _displayIndexOverrides.update { it.toMutableMap().apply { remove(groupId) } }
+       _displayIndexOverrides.update { it.toMutableMap().apply { remove(groupId) } }
 
         var currentText = ""
         engine.generateResponse(prompt).collect { partialResult ->
@@ -126,7 +126,8 @@ class ChatViewModel(
     }
 
     /**
-     * 覆盖默认视图索引，用于展示同一用户提问下的不同版本回复
+     * 覆盖默认视图索引
+     * 用户点 "<" ">" 切换 AI 回复版本时调用
      */
     fun changeDisplayIndex(groupId: String, newIndex: Int) {
         _displayIndexOverrides.update { it.toMutableMap().apply { put(groupId, newIndex) } }
