@@ -62,6 +62,7 @@ kotlin {
             implementation(libs.sqldelight.coroutines)
             //时间
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.4.1")
+            implementation(libs.kotlinx.datetime) // 提供跨端的时间处理能力
 
         }
         commonTest.dependencies {

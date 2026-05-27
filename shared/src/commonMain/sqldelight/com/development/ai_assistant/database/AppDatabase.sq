@@ -1,20 +1,21 @@
--- 建表语句：保持平实，不搞花里胡哨的外键
 CREATE TABLE MessageEntity (
     id TEXT NOT NULL PRIMARY KEY,
+    groupId TEXT NOT NULL,       -- 核心：唯一标识这一轮对话(User提问+AI的所有回复)
     content TEXT NOT NULL,
-    isUser INTEGER NOT NULL, -- 1 代表 User，0 代表 AI (SQLite 没有原生 Boolean)
-    timestamp INTEGER NOT NULL
+    isUser INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    interactionStatus INTEGER NOT NULL DEFAULT 0, -- 0=无操作，1=点赞，2=点踩
+    followUpQuestions TEXT       -- 存储追问列表，为了简单这里存逗号分隔的字符串或 JSON
 );
 
--- 查询所有记录，按时间排序
 selectAll:
 SELECT * FROM MessageEntity ORDER BY timestamp ASC;
 
--- 插入或替换一条记录
 insertMessage:
-INSERT OR REPLACE INTO MessageEntity(id, content, isUser, timestamp)
-VALUES (?, ?, ?, ?);
-
--- 更新消息内容（用于 AI 流式回复时的内容追加）
-updateContent:
-UPDATE MessageEntity SET content = ? WHERE id = ?;
+INSERT OR REPLACE INTO MessageEntity(id, groupId, content, isUser, timestamp, interactionStatus, followUpQuestions)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+selectById:
+SELECT * FROM MessageEntity WHERE id = ?;
+-- 互动状态 (点赞/点踩)
+updateInteractionStatus:
+UPDATE MessageEntity SET interactionStatus = ? WHERE id = ?;

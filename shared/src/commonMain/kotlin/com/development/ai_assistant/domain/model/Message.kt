@@ -1,8 +1,18 @@
 package com.development.ai_assistant.domain.model
 
-// 聊天消息实体类
 data class Message(
-    val id: String,          // 消息唯一标识
-    val content: String,     // 消息文本内容
-    val isUser: Boolean      // true 表示用户发送，false 表示 AI 回复
+    val id: String,
+    val groupId: String,
+    val content: String,
+    val isUser: Boolean,
+    val timestamp: Long = 0L, //记录产生时间
+    val interactionStatus: Int = 0,
+    val followUpQuestions: List<String> = emptyList()
+)
+
+data class ConversationTurn(
+    val groupId: String,
+    val userMessage: Message,
+    val aiMessages: List<Message>,
+    val currentDisplayIndex: Int
 )

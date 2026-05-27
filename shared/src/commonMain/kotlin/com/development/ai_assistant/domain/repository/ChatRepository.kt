@@ -1,3 +1,4 @@
+@file:OptIn(ExperimentalTime::class)
 package com.development.ai_assistant.domain.repository
 
 import app.cash.sqldelight.coroutines.asFlow
@@ -8,40 +9,75 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
+/**
+ * 聊天记录数据库
+ * 负责封装 SQLDelight 的底层数据库操作，并向表现层暴露响应式的数据流
+ */
 class ChatRepository(private val db: AppDatabase) {
 
-    // 获取包含所有历史记录的流
+    /**
+     * 监听全量消息流
+     */
     fun getAllMessagesFlow(): Flow<List<Message>> {
-        return db.appDatabaseQueries
-            .selectAll()
-            .asFlow()
-            .mapToList(Dispatchers.IO)
-            .map { entityList ->
-                // 将数据库实体转换为 UI 需要的模型
-                entityList.map { entity ->
-                    Message(
-                        id = entity.id,
-                        content = entity.content,
-                        isUser = entity.isUser == 1L
-                    )
-                }
+        return db.appDatabaseQueries.selectAll().asFlow().mapToList(Dispatchers.IO).map { entityList ->
+            entityList.map { entity ->
+                Message(
+                    id = entity.id,
+                    groupId = entity.groupId,
+                    content = entity.content,
+                    isUser = entity.isUser == 1L,
+                    timestamp = entity.timestamp,
+                    interactionStatus = entity.interactionStatus.toInt(),
+                    followUpQuestions = entity.followUpQuestions?.split("||")?.filter { it.isNotBlank() } ?: emptyList()
+                )
             }
+        }
     }
 
-    // 插入新消息
+    /**
+     * 插入或更新单条消息
+     */
     fun insertMessage(message: Message) {
+        val finalTimestamp = if (message.timestamp == 0L) {
+            Clock.System.now().toEpochMilliseconds()
+        } else {
+            message.timestamp
+        }
+
         db.appDatabaseQueries.insertMessage(
             id = message.id,
+            groupId = message.groupId,
             content = message.content,
             isUser = if (message.isUser) 1L else 0L,
-            timestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-            // timestamp = System.currentTimeMillis()
+            timestamp = finalTimestamp,
+            interactionStatus = message.interactionStatus.toLong(),
+            followUpQuestions = message.followUpQuestions.joinToString("||")
         )
     }
 
-    // 获取时间戳
-    private fun getCurrentTimeMillis(): Long {
-        return kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+    /**
+     * 更新单条消息的交互状态（点赞/点踩）
+     */
+    fun updateInteraction(messageId: String, status: Int) {
+        db.appDatabaseQueries.updateInteractionStatus(status.toLong(), messageId)
+    }
+
+    /**
+     * 根据主键查询单条消息
+     */
+    fun getMessageById(id: String): Message? {
+        val entity = db.appDatabaseQueries.selectById(id).executeAsOneOrNull() ?: return null
+        return Message(
+            id = entity.id,
+            groupId = entity.groupId,
+            content = entity.content,
+            isUser = entity.isUser == 1L,
+            timestamp = entity.timestamp,
+            interactionStatus = entity.interactionStatus.toInt(),
+            followUpQuestions = entity.followUpQuestions?.split("||")?.filter { it.isNotBlank() } ?: emptyList()
+        )
     }
 }
