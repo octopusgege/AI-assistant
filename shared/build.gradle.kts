@@ -86,6 +86,7 @@ kotlin {
             implementation(libs.kotlinx.datetime)
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.mikepenz.markdown.m3)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -23,7 +23,7 @@ import kotlin.time.ExperimentalTime
 /**
  * 聊天界面视图模型
  * 负责协调用户输入、本地数据库的持久化调度以及与底层推理引擎的流式数据交互。
- * 具备流式内容实时拦截解析能力，用于分离正文与推荐追问标签，并清洗大模型生成的冗余符号。
+ * 实现了基于时间窗口的节流机制（Throttling），保障富文本渲染时的 UI 帧率。
  */
 class ChatViewModel(
     private val repository: ChatRepository,
@@ -81,6 +81,10 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 引擎推理与流式控制
+     * 拦截 SSE 响应流，分离正文与追问标签，并应用节流阀避免过度的重绘请求阻塞主线程。
+     */
     private suspend fun executeEngineInference(groupId: String, prompt: String) {
         val now = Clock.System.now().toEpochMilliseconds() + 1
         val aiMsgId = "ai_$now"
@@ -98,11 +102,15 @@ class ChatViewModel(
         _displayIndexOverrides.update { it.toMutableMap().apply { remove(groupId) } }
 
         var currentText = ""
+        var displayContent = ""
+        var dynamicFollowUps = emptyList<String>()
+
+        // 渲染节流控制变量
+        var lastUpdateTime = 0L
+        val throttleIntervalMs = 150L
+
         engine.generateResponse(prompt).collect { partialResult ->
             currentText += partialResult
-
-            var displayContent = currentText
-            var dynamicFollowUps = emptyList<String>()
             val separator = "---追问---"
 
             if (currentText.contains(separator)) {
@@ -119,16 +127,33 @@ class ChatViewModel(
                                 .removeSurrounding("[", "]")
                                 .trim()
                         }
-                        .filter { it.isNotEmpty() }
+                        .filter { it.isNotEmpty()}
+                        // 取前 3 个追问
+                        .take(3)
                 }
+            } else {
+                displayContent = currentText
             }
 
-            val currentMsg = repository.getMessageById(aiMsgId) ?: initialAiMsg
-            repository.insertMessage(currentMsg.copy(
-                content = displayContent,
-                followUpQuestions = dynamicFollowUps
-            ))
+            val currentTime = Clock.System.now().toEpochMilliseconds()
+
+            // 节流阀逻辑：仅在距离上次更新超过指定时间窗口时，才放行数据库写入与 UI 状态更新
+            if (currentTime - lastUpdateTime >= throttleIntervalMs) {
+                val currentMsg = repository.getMessageById(aiMsgId) ?: initialAiMsg
+                repository.insertMessage(currentMsg.copy(
+                    content = displayContent,
+                    followUpQuestions = dynamicFollowUps
+                ))
+                lastUpdateTime = currentTime
+            }
         }
+
+        // 流式下发结束后，强制执行一次全量覆写，确保不会遗漏时间窗口内的最后尾部字符
+        val finalMsg = repository.getMessageById(aiMsgId) ?: initialAiMsg
+        repository.insertMessage(finalMsg.copy(
+            content = displayContent,
+            followUpQuestions = dynamicFollowUps
+        ))
     }
 
     fun changeDisplayIndex(groupId: String, newIndex: Int) {

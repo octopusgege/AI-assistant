@@ -30,11 +30,13 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
 import com.development.ai_assistant.domain.model.Message
 import com.development.ai_assistant.ui.viewmodel.ChatViewModel
+import com.mikepenz.markdown.m3.Markdown
 import org.koin.compose.koinInject
 
 /**
  * 聊天对话主界面
- * 负责渲染对话流、处理用户输入及协调软键盘交互状态
+ * 负责渲染对话流、处理用户输入及协调软键盘交互状态。
+ * 具备智能流式滚动追踪机制，支持长文本视口跟随及手势防抖拦截。
  */
 class ChatScreen : Screen {
 
@@ -49,23 +51,48 @@ class ChatScreen : Screen {
         val listState = rememberLazyListState()
 
         /**
-         * 监听列表滚动状态
-         * 当用户主动滑动查看历史消息时收起软键盘
+         * 自动滚动策略开关
+         * 用于维护视口焦点追踪状态。当该值为 true 时，列表将紧跟最新生成的流式字符。
+         */
+        var autoScrollEnabled by remember { mutableStateOf(true) }
+
+        /**
+         * 监听底层滑动系统事件
+         * 若触发原因为用户手动拖拽（isScrollInProgress = true），则立即熔断自动滚动策略，
+         * 赋予用户自由查阅历史上下文的控制权，避免视口被底层网络流式更新强制劫持。
          */
         LaunchedEffect(listState.isScrollInProgress) {
             if (listState.isScrollInProgress) {
+                autoScrollEnabled = false
                 keyboardController?.hide()
             }
         }
 
         /**
-         * 监听对话轮次变化
-         * 自动将视图滚动至最新消息的底部
+         * 监听会话轮次生命周期
+         * 当发起全新会话（提问或点击追问）引发轮次增长时，重置并激活自动滚动策略。
+         */
+        val turnCount = turns.size
+        LaunchedEffect(turnCount) {
+            autoScrollEnabled = true
+        }
+
+        /**
+         * 监听流式字符增量边界
+         * 执行视口定位调度。通过下发包含极致偏移量的滚动指令，抵消长文本高度撑破视口的排版溢出效应。
          */
         val lastTurnContent = turns.lastOrNull()?.aiMessages?.lastOrNull()?.content
-        LaunchedEffect(turns.size, lastTurnContent) {
+        LaunchedEffect(lastTurnContent) {
             if (turns.isNotEmpty()) {
-                listState.scrollToItem(turns.size - 1)
+                // 状态复位探测：若用户主动将视图拖拽至物理底部边界，则恢复视口追踪
+                if (!listState.canScrollForward) {
+                    autoScrollEnabled = true
+                }
+
+                if (autoScrollEnabled) {
+                    // 下发 32767 的冗余偏移量参数，强制 Compose 布局系统将该节点的底部坐标紧贴设备下边沿
+                    listState.scrollToItem(turns.size - 1, scrollOffset = 32767)
+                }
             }
         }
 
@@ -116,9 +143,6 @@ class ChatScreen : Screen {
                                 onDislike = { viewModel.onInteractionClicked(displayedAiMsg.id, displayedAiMsg.interactionStatus, 2) }
                             )
 
-                            /**
-                             * 渲染当前选中版本关联的追问建议列表
-                             */
                             if (displayedAiMsg.followUpQuestions.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 displayedAiMsg.followUpQuestions.forEach { question ->
@@ -238,7 +262,9 @@ private fun FollowUpChip(text: String, onClick: () -> Unit) {
 
 /**
  * 基础聊天气泡组件
- * 根据消息发送方身份动态调整背景色及圆角样式
+ * 基于消息所有者进行渲染策略分发：
+ * 用户输入采用轻量级 Text 以保障最高性能；
+ * AI 响应采用 Markdown 引擎构建抽象语法树，支持标题、表格及列表的富文本渲染。
  */
 @Composable
 private fun ChatBubble(message: Message) {
@@ -259,12 +285,18 @@ private fun ChatBubble(message: Message) {
                 .background(if (isUser) Color(0xFFE3F2FD) else Color(0xFFF4F5F7))
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            Text(
-                text = message.content,
-                color = Color.Black,
-                fontSize = 15.sp,
-                lineHeight = 22.sp
-            )
+            if (isUser) {
+                Text(
+                    text = message.content,
+                    color = Color.Black,
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp
+                )
+            } else {
+                Markdown(
+                    content = message.content
+                )
+            }
         }
     }
 }
