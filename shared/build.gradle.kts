@@ -1,5 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile // 👉 修复点：引入 JVM 编译任务类
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+import java.util.Properties
+import java.io.FileInputStream
+import java.io.File
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -8,6 +11,31 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.sqldelight)
 }
+
+val properties = Properties()
+val localPropertiesFile = project.rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    properties.load(FileInputStream(localPropertiesFile))
+}
+val apiKey = properties.getProperty("LLM_API_KEY", "")
+val apiUrl = properties.getProperty("LLM_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+val modelName = properties.getProperty("LLM_MODEL_NAME", "qwen-max")
+
+val configGeneratedDir = File(layout.buildDirectory.get().asFile, "generated/source/config/com/development/ai_assistant/config")
+configGeneratedDir.mkdirs()
+File(configGeneratedDir, "AppConfig.kt").writeText("""
+    package com.development.ai_assistant.config
+    
+    /**
+     * 全局应用配置
+     * 此文件由 Gradle 构建系统动态生成，实现了配置与代码的完全隔离
+     */
+    object AppConfig {
+        const val apiKey = "$apiKey"
+        const val apiUrl = "$apiUrl"
+        const val modelName = "$modelName"
+    }
+""".trimIndent())
 
 kotlin {
     listOf(
@@ -25,8 +53,6 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
 
-        // 👉 修复点：移除了这里原本引发报错的 compilerOptions 代码块
-
         androidResources {
             enable = true
         }
@@ -38,9 +64,9 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
-            // Android 平台的 SQLite 驱动
             implementation(libs.sqldelight.android)
             implementation(libs.koin.android)
+            implementation(libs.ktor.client.okhttp)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -51,27 +77,26 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
-            // 导航
             implementation(libs.voyager.navigator)
             implementation(libs.voyager.transitions)
-            // 依赖注入
             implementation(libs.koin.core)
             implementation(libs.koin.compose)
             implementation(compose.materialIconsExtended)
-            // SQLDelight 协程扩展
             implementation(libs.sqldelight.coroutines)
-            //时间
-            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.4.1")
-            implementation(libs.kotlinx.datetime) // 提供跨端的时间处理能力
-
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.ktor.client.core)
+            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
+
+        commonMain {
+            kotlin.srcDir(File(layout.buildDirectory.get().asFile, "generated/source/config"))
+        }
     }
 }
 
-//  配置 SQLDelight
 sqldelight {
     databases {
         create("AppDatabase") {
@@ -84,7 +109,6 @@ dependencies {
     androidRuntimeClasspath(libs.compose.uiTooling)
 }
 
-//
 tasks.withType<KotlinJvmCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)

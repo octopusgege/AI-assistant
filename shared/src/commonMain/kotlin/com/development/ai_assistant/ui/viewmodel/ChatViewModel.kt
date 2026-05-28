@@ -17,14 +17,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 /**
  * 聊天界面视图模型
  * 负责协调用户输入、本地数据库的持久化调度以及与底层推理引擎的流式数据交互。
- * 采用 MVI 架构中的单向数据流原则更新 UI 状态。
+ * 具备流式内容实时拦截解析能力，用于分离正文与推荐追问标签，并清洗大模型生成的冗余符号。
  */
 class ChatViewModel(
     private val repository: ChatRepository,
@@ -32,10 +31,6 @@ class ChatViewModel(
 ) {
     private val viewModelScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    /**
-     * 会话轮次状态流
-     * 从本地 SQLite 数据库订阅数据源，按 groupId 聚合提问与回复，并基于时间戳进行全局排序
-     */
     val conversationTurns: StateFlow<List<ConversationTurn>> = repository.getAllMessagesFlow()
         .map { messages ->
             val turns = mutableListOf<ConversationTurn>()
@@ -55,17 +50,10 @@ class ChatViewModel(
     private val _displayIndexOverrides = MutableStateFlow<Map<String, Int>>(emptyMap())
     val displayIndexOverrides = _displayIndexOverrides.asStateFlow()
 
-    /**
-     * 更新输入框文本状态
-     */
     fun onInputTextChanged(newText: String) {
         _inputText.value = newText
     }
 
-    /**
-     * 派发用户消息
-     * 调度至 IO 线程以避免数据库写入阻塞主线程，同时生成基于毫秒级时间戳的唯一标识
-     */
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         onInputTextChanged("")
@@ -87,23 +75,15 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * 触发多版本回复重新生成逻辑
-     */
     fun regenerateResponse(groupId: String, prompt: String) {
         viewModelScope.launch(Dispatchers.IO) {
             executeEngineInference(groupId, prompt)
         }
     }
 
-    /**
-     * 执行底层引擎推理过程
-     * 创建占位消息后，收集引擎流式分发的数据，通过内存累加方式同步覆盖写入数据库
-     */
     private suspend fun executeEngineInference(groupId: String, prompt: String) {
         val now = Clock.System.now().toEpochMilliseconds() + 1
         val aiMsgId = "ai_$now"
-        val initialFollowUps = listOf("你能详细解释一下吗？", "这个方案有什么优缺点？")
 
         val initialAiMsg = Message(
             id = aiMsgId,
@@ -111,32 +91,50 @@ class ChatViewModel(
             content = "正在思考...",
             isUser = false,
             timestamp = now,
-            followUpQuestions = initialFollowUps
+            followUpQuestions = emptyList()
         )
         repository.insertMessage(initialAiMsg)
 
-       _displayIndexOverrides.update { it.toMutableMap().apply { remove(groupId) } }
+        _displayIndexOverrides.update { it.toMutableMap().apply { remove(groupId) } }
 
         var currentText = ""
         engine.generateResponse(prompt).collect { partialResult ->
             currentText += partialResult
+
+            var displayContent = currentText
+            var dynamicFollowUps = emptyList<String>()
+            val separator = "---追问---"
+
+            if (currentText.contains(separator)) {
+                val parts = currentText.split(separator)
+                displayContent = parts[0].trim()
+
+                if (parts.size > 1) {
+                    val followUpsText = parts[1]
+                    dynamicFollowUps = followUpsText.lines()
+                        .filter { it.isNotBlank() }
+                        .map { line ->
+                            line.replace(Regex("^[-*\\d.]+\\s*"), "")
+                                .trim()
+                                .removeSurrounding("[", "]")
+                                .trim()
+                        }
+                        .filter { it.isNotEmpty() }
+                }
+            }
+
             val currentMsg = repository.getMessageById(aiMsgId) ?: initialAiMsg
-            repository.insertMessage(currentMsg.copy(content = currentText))
+            repository.insertMessage(currentMsg.copy(
+                content = displayContent,
+                followUpQuestions = dynamicFollowUps
+            ))
         }
     }
 
-    /**
-     * 覆盖默认视图索引
-     * 用户点 "<" ">" 切换 AI 回复版本时调用
-     */
     fun changeDisplayIndex(groupId: String, newIndex: Int) {
         _displayIndexOverrides.update { it.toMutableMap().apply { put(groupId, newIndex) } }
     }
 
-    /**
-     * 处理交互事件（点赞/点踩）
-     * 状态机支持反向取消逻辑，状态变更通过 IO 线程同步至数据库
-     */
     fun onInteractionClicked(messageId: String, currentStatus: Int, targetStatus: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             val finalStatus = if (currentStatus == targetStatus) 0 else targetStatus
