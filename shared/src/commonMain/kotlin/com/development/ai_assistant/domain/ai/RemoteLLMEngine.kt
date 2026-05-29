@@ -1,6 +1,9 @@
 package com.development.ai_assistant.domain.ai
 
-import com.development.ai_assistant.config.AppConfig
+// 👉 1. 导入全新的配置类
+import com.development.ai_assistant.config.LLMConfig
+
+// 👉 2. Ktor 核心扩展函数导入（缺一不可）
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
@@ -11,6 +14,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readUTF8Line
+
+// 👉 3. 协程与 JSON 序列化导入
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -25,15 +30,15 @@ import kotlinx.serialization.json.put
 /**
  * 远端大模型网络推理引擎
  * 负责建立长连接并解析 Server-Sent Events (SSE) 流式响应数据。
- * 使用 kotlinx.serialization 安全构建请求体，防止特殊字符引发 JSON 解析异常。
  */
 class RemoteLLMEngine(
     private val httpClient: HttpClient
 ) : LLMEngine {
 
-    private val apiUrl = AppConfig.apiUrl
-    private val apiKey = AppConfig.apiKey
-    private val modelName = AppConfig.modelName
+    // 直接读取我们刚刚手动创建的 LLMConfig
+    private val apiUrl = LLMConfig.API_URL
+    private val apiKey = LLMConfig.API_KEY
+    private val modelName = LLMConfig.MODEL_NAME
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
 
@@ -52,6 +57,8 @@ class RemoteLLMEngine(
         val requestBody = buildJsonObject {
             put("model", modelName)
             put("stream", true)
+            // 开启大模型的联网检索能力
+            put("enable_search", true)
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "system")
@@ -88,14 +95,14 @@ class RemoteLLMEngine(
                                     emit(content)
                                 }
                             } catch (e: Exception) {
-
+                                // 维持流持续性，忽略局部反序列化错误
                             }
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            emit("\n[网络通信异常，请检查本地配置文件或设备网络状态]")
+            emit("\n[网络通信异常，请检查设备网络状态]")
         }
     }
 }
