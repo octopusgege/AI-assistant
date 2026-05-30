@@ -21,6 +21,8 @@ kotlinx-datetime = "0.5.0"
 ktor = "2.3.11"
 kotlinx-serialization-json = "1.6.3"
 mikepenz-markdown = "0.27.0"
+peekaboo = "0.5.2"
+
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -53,6 +55,7 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization-json" }
 mikepenz-markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "mikepenz-markdown" }
+peekaboo-image-picker = { module = "io.github.onseok:peekaboo-image-picker", version.ref = "peekaboo" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

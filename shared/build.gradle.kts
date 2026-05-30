@@ -87,6 +87,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.mikepenz.markdown.m3)
+            implementation(libs.peekaboo.image.picker)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

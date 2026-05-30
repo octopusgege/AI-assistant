@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -40,21 +41,22 @@ import com.development.ai_assistant.domain.model.Message
 import com.development.ai_assistant.ui.viewmodel.ChatViewModel
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
+import com.preat.peekaboo.image.picker.SelectionMode
+import com.preat.peekaboo.image.picker.rememberImagePickerLauncher
+import com.preat.peekaboo.image.picker.toImageBitmap
 import org.koin.compose.koinInject
 
 /**
  * 聊天对话主界面
  * 负责渲染多模态对话信息流、处理用户长按交互录音机制、协调软键盘的弹出与收起，
- * 并提供流式输出时的列表自适应滚动状态管理。
+ * 调度跨端系统图库选择器，并提供流式输出时的列表自适应滚动状态管理。
  */
 class ChatScreen : Screen {
 
     @Composable
     override fun Content() {
-        // 通过 Koin 依赖注入框架获取页面级 ViewModel 单例
         val viewModel = koinInject<ChatViewModel>()
 
-        // 绑定状态流，驱动 UI 组合函数进行响应式重绘
         val turns by viewModel.conversationTurns.collectAsState()
         val indexOverrides by viewModel.displayIndexOverrides.collectAsState()
         val inputText by viewModel.inputText.collectAsState()
@@ -64,17 +66,23 @@ class ChatScreen : Screen {
         val keyboardController = LocalSoftwareKeyboardController.current
         val listState = rememberLazyListState()
 
-        /**
-         * 滚动追踪策略调度器
-         * 维护视口焦点追踪状态。值为 true 时，列表焦点严格锚定在模型生成的最新字符处。
-         */
         var autoScrollEnabled by remember { mutableStateOf(true) }
 
-        /**
-         * 用户交互拦截器
-         * 监听底层滑动系统事件。若因用户手动拖拽导致滑动，则立即挂起自动滚动策略，
-         * 并收回软键盘，确保底层流式更新不会强制劫持用户的阅读视口。
-         */
+        // 多模态图像数据暂存器，持有系统图库回调的底层字节数组
+        var selectedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
+        val scope = rememberCoroutineScope()
+
+        // 跨端图像选择器生命周期与回调绑定，限制为单选模式，提升交互聚焦度
+        val imagePicker = rememberImagePickerLauncher(
+            selectionMode = SelectionMode.Single,
+            scope = scope,
+            onResult = { byteArrays ->
+                byteArrays.firstOrNull()?.let {
+                    selectedImageBytes = it
+                }
+            }
+        )
+
         LaunchedEffect(listState.isScrollInProgress) {
             if (listState.isScrollInProgress) {
                 autoScrollEnabled = false
@@ -82,20 +90,11 @@ class ChatScreen : Screen {
             }
         }
 
-        /**
-         * 会话轮次生命周期监听器
-         * 检测到新增会话时，主动重置并唤醒视口追踪策略。
-         */
         val turnCount = turns.size
         LaunchedEffect(turnCount) {
             autoScrollEnabled = true
         }
 
-        /**
-         * 流式字符边界监听与视口定位机制
-         * 通过下发极值偏移量参数，强制 Compose 布局引擎将列表尾节点贴合屏幕底部，
-         * 有效化解大段富文本动态排版过程中的高度溢出问题。
-         */
         val lastTurnContent = turns.lastOrNull()?.aiMessages?.lastOrNull()?.content
         LaunchedEffect(lastTurnContent) {
             if (turns.isNotEmpty()) {
@@ -120,21 +119,24 @@ class ChatScreen : Screen {
                 ChatBottomBar(
                     inputText = inputText,
                     isListening = isListening,
+                    selectedImageBytes = selectedImageBytes,
                     onInputChanged = viewModel::onInputTextChanged,
                     onSendClicked = {
+                        // TODO: 后续迭代将在此处整合图文混合数据体传递给大模型
                         viewModel.sendMessage(inputText)
+                        selectedImageBytes = null
                         keyboardController?.hide()
                     },
                     onMicPress = viewModel::startVoiceInput,
-                    onMicRelease = viewModel::stopAndSendVoiceInput
+                    onMicRelease = viewModel::stopAndSendVoiceInput,
+                    onLaunchImagePicker = { imagePicker.launch() },
+                    onClearImage = { selectedImageBytes = null }
                 )
             },
             containerColor = Color.White
         ) { paddingValues ->
-            // 使用 Box 容器隔离基础对话列表层与上层动态交互面板层
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
-                // 基础消息流渲染层
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -177,7 +179,6 @@ class ChatScreen : Screen {
                     }
                 }
 
-                // 语音输入视觉交互面板层（基于状态驱动的进入/退出动画）
                 AnimatedVisibility(
                     visible = isListening,
                     enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -312,6 +313,7 @@ private fun AiActionBar(
                 modifier = Modifier.size(20.dp).clickable { onSpeakClicked() }
             )
         }
+
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (totalVersions > 1) {
                 Text(
@@ -344,6 +346,7 @@ private fun AiActionBar(
         }
     }
 }
+
 /**
  * 上下文追问推断组件
  * 渲染模型解析出的结构化预测文本，点击实现快捷发送，用以降低交互折损率。
@@ -366,6 +369,7 @@ private fun FollowUpChip(text: String, onClick: () -> Unit) {
         Text(text = text, color = Color.Blue, fontSize = 13.sp)
     }
 }
+
 /**
  * 消息气泡渲染器
  * 根据实体属性进行异构组件分发：
@@ -417,25 +421,58 @@ private fun ChatBubble(message: Message) {
 }
 
 /**
- * 底部多模态输入台
- * 根据文本流及手势状态进行按钮变体：动态派发文本提交事件或阻塞执行录音时序交互逻辑。
+ * 底部多模态交互控制台
+ * 融合文本、音频及图像的输入调度。内部维护独立的附加菜单状态与对象缓冲区的渲染逻辑。
  */
 @Composable
 private fun ChatBottomBar(
     inputText: String,
     isListening: Boolean,
+    selectedImageBytes: ByteArray?,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
     onMicPress: () -> Unit,
-    onMicRelease: () -> Unit
+    onMicRelease: () -> Unit,
+    onLaunchImagePicker: () -> Unit,
+    onClearImage: () -> Unit
 ) {
-    Box(
+    var showAddMenu by remember { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.White)
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+
+        AnimatedVisibility(visible = selectedImageBytes != null) {
+            Box(modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)) {
+                selectedImageBytes?.let { bytes ->
+                    Image(
+                        bitmap = bytes.toImageBitmap(),
+                        contentDescription = "待发送的图像源",
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 6.dp, y = (-6).dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Red)
+                        .clickable { onClearImage() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "清除图像", tint = Color.White, modifier = Modifier.size(12.dp))
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -460,8 +497,9 @@ private fun ChatBottomBar(
                     }
                 }
             )
+
             val iconPadding = Modifier.padding(bottom = 2.dp)
-            if (inputText.isNotEmpty() && !isListening && inputText != "正在聆听..." && !inputText.startsWith("[")) {
+            if ((inputText.isNotEmpty() || selectedImageBytes != null) && !isListening && inputText != "正在聆听..." && !inputText.startsWith("[")) {
                 Box(
                     modifier = iconPadding
                         .size(32.dp)
@@ -470,14 +508,11 @@ private fun ChatBottomBar(
                         .clickable { onSendClicked() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送消息", tint = Color.White, modifier = Modifier.size(16.dp).padding(start = 2.dp))
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送请求", tint = Color.White, modifier = Modifier.size(16.dp).padding(start = 2.dp))
                 }
             } else {
                 Box(
-                    modifier = iconPadding
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(if (isListening) Color.Blue else Color.White)
+                    modifier = iconPadding.size(28.dp).clip(CircleShape).background(if (isListening) Color.Blue else Color.White)
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onPress = {
@@ -489,19 +524,31 @@ private fun ChatBottomBar(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Mic,
-                        contentDescription = "语音输入",
-                        tint = if (isListening) Color.White else Color.Black,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.Default.Mic, contentDescription = "启动声学传感器", tint = if (isListening) Color.White else Color.Black, modifier = Modifier.size(18.dp))
                 }
                 Spacer(modifier = Modifier.width(12.dp))
-                Box(
-                    modifier = iconPadding.size(28.dp).clip(CircleShape).background(Color.White),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "更多功能", tint = Color.Black, modifier = Modifier.size(18.dp))
+
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = iconPadding.size(28.dp).clip(CircleShape).background(Color.White)
+                            .clickable { showAddMenu = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "展开扩展功能栈", tint = Color.Black, modifier = Modifier.size(18.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = showAddMenu,
+                        onDismissRequest = { showAddMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("🖼️ 从相册选择") },
+                            onClick = {
+                                showAddMenu = false
+                                onLaunchImagePicker()
+                            }
+                        )
+                    }
                 }
             }
         }
