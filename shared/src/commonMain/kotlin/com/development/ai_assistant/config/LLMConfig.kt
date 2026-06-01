@@ -11,5 +11,5 @@ object LLMConfig {
     // 请在此处填入你 local.properties 中的真实 Key，例如 "sk-1f32..."
     const val API_KEY = "sk-91603b0f15c7477ba6b6fc065425e358"
 
-    const val MODEL_NAME = "qwen-max"
+    const val MODEL_NAME = "qwen3.5-omni-plus"
 }

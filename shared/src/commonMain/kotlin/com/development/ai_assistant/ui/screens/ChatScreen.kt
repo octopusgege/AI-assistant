@@ -11,7 +11,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -49,7 +52,7 @@ import org.koin.compose.koinInject
 /**
  * 聊天对话主界面
  * 负责渲染多模态对话信息流、处理用户长按交互录音机制、协调软键盘的弹出与收起，
- * 调度跨端系统图库选择器，并提供流式输出时的列表自适应滚动状态管理。
+ * 调度跨端系统图库选择器（支持多图并发），并提供流式输出时的列表自适应滚动状态管理。
  */
 class ChatScreen : Screen {
 
@@ -68,17 +71,20 @@ class ChatScreen : Screen {
 
         var autoScrollEnabled by remember { mutableStateOf(true) }
 
-        // 多模态图像数据暂存器，持有系统图库回调的底层字节数组
-        var selectedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
+        // 多模态图像数据队列，持有系统图库回调的多个底层字节数组
+        var selectedImages by remember { mutableStateOf<List<ByteArray>>(emptyList()) }
         val scope = rememberCoroutineScope()
 
-        // 跨端图像选择器生命周期与回调绑定，限制为单选模式，提升交互聚焦度
+        // 跨端图像选择器生命周期与回调绑定，采用多选模式，硬性限制最大张数为 4，保障渲染性能与带宽
         val imagePicker = rememberImagePickerLauncher(
-            selectionMode = SelectionMode.Single,
+            selectionMode = SelectionMode.Multiple(maxSelection = 4),
             scope = scope,
             onResult = { byteArrays ->
-                byteArrays.firstOrNull()?.let {
-                    selectedImageBytes = it
+                if (byteArrays.isNotEmpty()) {
+                    // 追加合并逻辑：将新选择的图片加入队列，但整体队列长度不超过 4 张
+                    val currentList = selectedImages.toMutableList()
+                    currentList.addAll(byteArrays)
+                    selectedImages = currentList.take(4)
                 }
             }
         )
@@ -119,18 +125,25 @@ class ChatScreen : Screen {
                 ChatBottomBar(
                     inputText = inputText,
                     isListening = isListening,
-                    selectedImageBytes = selectedImageBytes,
+                    selectedImages = selectedImages,
                     onInputChanged = viewModel::onInputTextChanged,
                     onSendClicked = {
-                        // TODO: 后续迭代将在此处整合图文混合数据体传递给大模型
-                        viewModel.sendMessage(inputText)
-                        selectedImageBytes = null
+                        // 向 ViewModel 投递文本与多图集合
+                        viewModel.sendMessage(inputText, selectedImages)
+                        selectedImages = emptyList() // 发送完毕后清空缓存区
                         keyboardController?.hide()
                     },
                     onMicPress = viewModel::startVoiceInput,
                     onMicRelease = viewModel::stopAndSendVoiceInput,
                     onLaunchImagePicker = { imagePicker.launch() },
-                    onClearImage = { selectedImageBytes = null }
+                    onClearImage = { indexToRemove ->
+                        // 根据索引安全移除队列中的特定图像
+                        val currentList = selectedImages.toMutableList()
+                        if (indexToRemove in currentList.indices) {
+                            currentList.removeAt(indexToRemove)
+                            selectedImages = currentList
+                        }
+                    }
                 )
             },
             containerColor = Color.White
@@ -218,10 +231,6 @@ class ChatScreen : Screen {
     }
 }
 
-/**
- * 顶部导航控制台组件
- * 提供视图层级返回、会话元数据展示及全局自动语音播报功能的快捷干预入口。
- */
 @Composable
 private fun ChatTopBar(
     isAutoSpeakEnabled: Boolean,
@@ -259,10 +268,6 @@ private fun ChatTopBar(
     }
 }
 
-/**
- * AI 消息气泡交互操作栏
- * 封装并管理关联回复实体的剪贴板读写、质量反馈投递、文本朗读队列插队及上下文重试逻辑。
- */
 @Composable
 private fun AiActionBar(
     message: Message,
@@ -347,10 +352,6 @@ private fun AiActionBar(
     }
 }
 
-/**
- * 上下文追问推断组件
- * 渲染模型解析出的结构化预测文本，点击实现快捷发送，用以降低交互折损率。
- */
 @Composable
 private fun FollowUpChip(text: String, onClick: () -> Unit) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -370,12 +371,6 @@ private fun FollowUpChip(text: String, onClick: () -> Unit) {
     }
 }
 
-/**
- * 消息气泡渲染器
- * 根据实体属性进行异构组件分发：
- * - 客户端源采用轻量原生 Text。
- * - 服务端源引入底层 Markdown 引擎构建 AST 解析树，并覆写排版参数以防范视觉层越界。
- */
 @Composable
 private fun ChatBubble(message: Message) {
     val isUser = message.isUser
@@ -422,19 +417,19 @@ private fun ChatBubble(message: Message) {
 
 /**
  * 底部多模态交互控制台
- * 融合文本、音频及图像的输入调度。内部维护独立的附加菜单状态与对象缓冲区的渲染逻辑。
+ * 融合文本、音频及多图像的并发输入调度。采用横向滚动容器处理图像溢出。
  */
 @Composable
 private fun ChatBottomBar(
     inputText: String,
     isListening: Boolean,
-    selectedImageBytes: ByteArray?,
+    selectedImages: List<ByteArray>,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onLaunchImagePicker: () -> Unit,
-    onClearImage: () -> Unit
+    onClearImage: (Int) -> Unit
 ) {
     var showAddMenu by remember { mutableStateOf(false) }
 
@@ -446,29 +441,36 @@ private fun ChatBottomBar(
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
 
-        AnimatedVisibility(visible = selectedImageBytes != null) {
-            Box(modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)) {
-                selectedImageBytes?.let { bytes ->
-                    Image(
-                        bitmap = bytes.toImageBitmap(),
-                        contentDescription = "待发送的图像源",
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                    )
-                }
+        // 动态视口：利用 LazyRow 渲染横向扩展的缩略图矩阵
+        AnimatedVisibility(visible = selectedImages.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp, start = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(selectedImages) { index, bytes ->
+                    Box {
+                        Image(
+                            bitmap = bytes.toImageBitmap(),
+                            contentDescription = "待发送的图像源 $index",
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop // 居中裁剪，保证所有缩略图视觉统一
+                        )
 
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-6).dp)
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(Color.Red)
-                        .clickable { onClearImage() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "清除图像", tint = Color.White, modifier = Modifier.size(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 6.dp, y = (-6).dp)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color.Red)
+                                .clickable { onClearImage(index) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "清除该图像", tint = Color.White, modifier = Modifier.size(12.dp))
+                        }
+                    }
                 }
             }
         }
@@ -499,7 +501,7 @@ private fun ChatBottomBar(
             )
 
             val iconPadding = Modifier.padding(bottom = 2.dp)
-            if ((inputText.isNotEmpty() || selectedImageBytes != null) && !isListening && inputText != "正在聆听..." && !inputText.startsWith("[")) {
+            if ((inputText.isNotEmpty() || selectedImages.isNotEmpty()) && !isListening && inputText != "正在聆听..." && !inputText.startsWith("[")) {
                 Box(
                     modifier = iconPadding
                         .size(32.dp)
