@@ -23,7 +23,6 @@ kotlinx-serialization-json = "1.6.3"
 mikepenz-markdown = "0.27.0"
 peekaboo = "0.5.2"
 
-
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlin-testJunit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }

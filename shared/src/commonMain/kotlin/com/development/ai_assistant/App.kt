@@ -12,7 +12,7 @@ fun App() {
 
 
     MaterialTheme {
-        // 直接将 ChatScreen 作为根页面
+        // 将 ChatScreen 作为根页面
         Navigator(ChatScreen()) { navigator ->
             SlideTransition(navigator)
         }
