@@ -67,7 +67,7 @@ class LocalLlamaEngine(private val context: Context) : LLMEngine {
             // 只有加上特定的 <|im_start|> 和 <|im_end|> 标记，模型才能分清谁是系统、谁是用户
             val chatMlPrompt = """
                 <|im_start|>system
-                你是一个AI 助手，用简洁准确的语言回复用户问题。<|im_end|>
+                你是一个聪明的AI助手，用简洁准确的语言是回复用户问题。<|im_end|>
                 <|im_start|>user
                 $prompt<|im_end|>
                 <|im_start|>assistant
