@@ -1,7 +1,7 @@
 package com.development.ai_assistant.utils
 
 /**
- * 跨端语音识别接口
+ * 跨端语音识别接口（语音转文字）
  */
 interface STTManager {
     /**
