@@ -658,7 +658,7 @@ private fun ChatBottomBar(
                         onDismissRequest = { showAddMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("🖼️ 从本地图库获取张量源") },
+                            text = { Text("🖼️ 相册") },
                             onClick = {
                                 showAddMenu = false
                                 onLaunchImagePicker() // 拉起原生系统级进程交互
