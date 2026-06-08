@@ -18,7 +18,6 @@ actual fun platformModule(): Module = module {
     single<TTSManager> { AndroidTTSManager(androidContext()) }
     single<STTManager> { AndroidSTTManager(androidContext()) }
 
-
     single<LLMEngine>(named("localEngine")) {
         LocalLlamaEngine(androidContext())
     }

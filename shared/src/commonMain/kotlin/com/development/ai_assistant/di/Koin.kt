@@ -25,8 +25,7 @@ val sharedModule = module {
 
 
     single<LLMEngine>(named("remoteEngine")) {
-        // 当前为 Mock 模式。需要连真网时，换成 RemoteLLMEngine(get()) 即可
-        MockLLMEngine()
+        RemoteLLMEngine(get())
     }
 
 
