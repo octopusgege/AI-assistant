@@ -10,6 +10,9 @@ data class Message(
     val followUpQuestions: List<String> = emptyList()
 )
 
+/**
+ * ConversationTurn：一问一答组合为一个轮次
+ */
 data class ConversationTurn(
     val groupId: String,
     val userMessage: Message,
