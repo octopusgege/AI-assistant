@@ -63,6 +63,7 @@ class RemoteLLMEngine(
             add(buildJsonObject {
                 put("type", "text")
                 put("text", prompt.ifBlank { "请仔细分析并描述提供的图片内容" })
+
             })
 
             // 节点 2：遍历压入所有的图像数据
@@ -84,7 +85,8 @@ class RemoteLLMEngine(
         // 构建最终的 POST 请求报文体
         val requestBody = buildJsonObject {
             put("model", modelName)
-            put("stream", true) // 必须开启流式输出
+            put("stream", true)
+            put("enable_search", true)//联网
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "system")
